@@ -85,6 +85,52 @@ type SchemaProperty struct {
 	AdditionalProperties interface{}    `json:"additionalProperties,omitempty"`
 }
 
+func loadValueForKey(properties map[string]interface{}, key string, values []string) interface{} {
+	valueType := ""
+	valueFormat := ""
+	elemType := ""
+	elemFormat := ""
+	propI, found := properties[key]
+	if found {
+		prop := propI.(map[string]interface{})
+		t, found := prop["type"]
+		if found {
+			valueType = t.(string)
+		}
+		f, found := prop["format"]
+		if found {
+			valueFormat = f.(string)
+		}
+		if items, ok := prop["items"]; ok {
+			if t, ok := items.(map[string]interface{})["type"]; ok {
+				elemType = t.(string)
+			}
+			if f, ok := items.(map[string]interface{})["format"]; ok {
+				elemFormat = f.(string)
+			}
+		}
+	}
+
+	// if parameter isn't an array and we didn't receive multiple values, pass it as a normal value
+	if len(values) == 1 && valueType != "array" {
+		return coerce(values[0], valueType, valueFormat)
+	}
+
+	// if we received multiple values, use them as the elements; otherwise, split the value we got
+	var items []string
+	if len(values) > 1 {
+		items = values
+	} else {
+		items = strings.Split(values[0], ",")
+	}
+
+	result := []interface{}{}
+	for _, item := range items {
+		result = append(result, coerce(strings.TrimSpace(item), elemType, elemFormat))
+	}
+	return result
+}
+
 // SwaggerValidator middleware
 func SwaggerValidator(api *swagger.API) gin.HandlerFunc {
 
@@ -124,54 +170,10 @@ func SwaggerValidator(api *swagger.API) gin.HandlerFunc {
 		document := map[string]interface{}{}
 
 		for _, p := range c.Params {
-			document[p.Key] = coerce(p.Value, "", "")
+			document[p.Key] = loadValueForKey(properties, p.Key, []string{p.Value})
 		}
 		for k, v := range c.Request.URL.Query() {
-			valueType := ""
-			valueFormat := ""
-			elemType := ""
-			elemFormat := ""
-			propI, found := properties[k]
-			if found {
-				prop := propI.(map[string]interface{})
-				t, found := prop["type"]
-				if found {
-					valueType = t.(string)
-				}
-				f, found := prop["format"]
-				if found {
-					valueFormat = f.(string)
-				}
-				if items, ok := prop["items"]; ok {
-					if t, ok := items.(map[string]interface{})["type"]; ok {
-						elemType = t.(string)
-					}
-					if f, ok := items.(map[string]interface{})["format"]; ok {
-						elemFormat = f.(string)
-					}
-				}
-			}
-
-			// if parameter isn't an array and we didn't receive multiple values, pass it as a normal value
-			if len(v) == 1 && valueType != "array" {
-				document[k] = coerce(v[0], valueType, valueFormat)
-				continue
-			}
-
-			var items []string
-
-			// if we received multiple values, use them as the elements; otherwise, split the value we got
-			if len(v) > 1 {
-				items = v
-			} else {
-				items = strings.Split(v[0], ",")
-			}
-
-			values := []interface{}{}
-			for _, item := range items {
-				values = append(values, coerce(strings.TrimSpace(item), elemType, elemFormat))
-			}
-			document[k] = values
+			document[k] = loadValueForKey(properties, k, v)
 		}
 
 		// For muiltipart form, handle params and file uploads
@@ -240,8 +242,10 @@ func SwaggerValidator(api *swagger.API) gin.HandlerFunc {
 		result, err := gojsonschema.Validate(schemaLoader, documentLoader)
 
 		if err != nil {
-			// fmt.Printf("ERROR: %s", err)
-			c.Next()
+			// fmt.Printf("ERROR: %s\n", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"message": "swagger document " + err.Error(),
+			})
 
 		} else if result.Valid() {
 			// fmt.Printf("The document is valid\n")
@@ -383,7 +387,6 @@ func buildSchemaDefinitions(api *swagger.API) map[string]SchemaDefinition {
 		}
 		for k, p := range d.Properties {
 			sp := SchemaProperty{
-				Type:                 strings.Split(p.Type, ","),
 				Description:          p.Description,
 				Enum:                 p.Enum,
 				Format:               p.Format,
@@ -397,6 +400,9 @@ func buildSchemaDefinitions(api *swagger.API) map[string]SchemaDefinition {
 				ExclusiveMinimum:     p.ExclusiveMinimum,
 				ExclusiveMaximum:     p.ExclusiveMaximum,
 				AdditionalProperties: p.AdditionalProperties,
+			}
+			if p.Type != "" {
+				sp.Type = strings.Split(p.Type, ",")
 			}
 			if p.Nullable {
 				sp.Type = append(sp.Type, "null")
