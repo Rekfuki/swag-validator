@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/miketonks/swag"
+	swag "github.com/miketonks/swag"
 	"github.com/miketonks/swag/endpoint"
 	"github.com/miketonks/swag/swagger"
 	"github.com/stretchr/testify/assert"
@@ -18,20 +18,24 @@ import (
 	sv "swag-validator"
 )
 
+type nested struct {
+	Foo string `json:"foo" binding:"required"`
+}
+
 type payload struct {
-	FormatString     string          `json:"format_str" binding:"required" format:"uuid"`
-	FormatStringArr  []string        `json:"format_str_arr" binding:"required" format:"uuid"`
-	MinLenString     string          `json:"min_len_str,omitempty" min_length:"5"`
-	MinLenStringArr  []string        `json:"min_len_str_arr,omitempty" min_length:"5"`
-	MaxLenString     string          `json:"max_len_str,omitempty" max_length:"7"`
-	MaxLenStringArr  []string        `json:"max_len_str_arr,omitempty" max_length:"7"`
-	EnumString       string          `json:"enum_str,omitempty" enum:"Foo,Bar"`
-	EnumStringArr    []string        `json:"enum_str_arr,omitempty" enum:"Foo,Bar"`
-	PatternString    string          `json:"pattern_str,omitempty" pattern:"^test\\d$"`
-	PatternStringArr []string        `json:"pattern_str_arr,omitempty" pattern:"^test\\d$"`
-	RawJSON          json.RawMessage `json:"raw_json,omitempty"`
-	Minimum          int             `json:"minimum,omitempty" minimum:"5"`
-	Maximum          int             `json:"maximum,omitempty" maximum:"1"`
+	FormatString     string   `json:"format_str" binding:"required" format:"uuid"`
+	FormatStringArr  []string `json:"format_str_arr" binding:"required" format:"uuid"`
+	MinLenString     string   `json:"min_len_str,omitempty" min_length:"5"`
+	MinLenStringArr  []string `json:"min_len_str_arr,omitempty" min_length:"5"`
+	MaxLenString     string   `json:"max_len_str,omitempty" max_length:"7"`
+	MaxLenStringArr  []string `json:"max_len_str_arr,omitempty" max_length:"7"`
+	EnumString       string   `json:"enum_str,omitempty" enum:"Foo,Bar"`
+	EnumStringArr    []string `json:"enum_str_arr,omitempty" enum:"Foo,Bar"`
+	PatternString    string   `json:"pattern_str,omitempty" pattern:"^test\\d$"`
+	PatternStringArr []string `json:"pattern_str_arr,omitempty" pattern:"^test\\d$"`
+	Minimum          int      `json:"minimum,omitempty" minimum:"5"`
+	Maximum          int      `json:"maximum,omitempty" maximum:"1"`
+	Nested           nested   `json:"nested" binding:"required"`
 }
 
 var testUUID = "00000000-0000-0000-0000-000000000000"
