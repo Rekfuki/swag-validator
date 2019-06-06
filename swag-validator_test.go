@@ -15,7 +15,7 @@ import (
 	"github.com/miketonks/swag/swagger"
 	"github.com/stretchr/testify/assert"
 
-	sv "swag-validator"
+	sv "github.com/miketonks/swag-validator"
 )
 
 type nested struct {
@@ -23,8 +23,8 @@ type nested struct {
 }
 
 type payload struct {
-	FormatString     string   `json:"format_str" binding:"required" format:"uuid"`
-	FormatStringArr  []string `json:"format_str_arr" binding:"required" format:"uuid"`
+	FormatString     string   `json:"format_str" format:"uuid"`
+	FormatStringArr  []string `json:"format_str_arr" format:"uuid"`
 	MinLenString     string   `json:"min_len_str,omitempty" min_length:"5"`
 	MinLenStringArr  []string `json:"min_len_str_arr,omitempty" min_length:"5"`
 	MaxLenString     string   `json:"max_len_str,omitempty" max_length:"7"`
@@ -35,7 +35,7 @@ type payload struct {
 	PatternStringArr []string `json:"pattern_str_arr,omitempty" pattern:"^test\\d$"`
 	Minimum          int      `json:"minimum,omitempty" minimum:"5"`
 	Maximum          int      `json:"maximum,omitempty" maximum:"1"`
-	Nested           nested   `json:"nested" binding:"required"`
+	Nested           nested   `json:"nested"`
 }
 
 var testUUID = "00000000-0000-0000-0000-000000000000"
@@ -43,7 +43,6 @@ var testUUID = "00000000-0000-0000-0000-000000000000"
 func TestSwaggerValidator(t *testing.T) {
 
 	testTable := []struct {
-		name             string
 		description      string
 		in               payload
 		expectedStatus   int
@@ -64,7 +63,7 @@ func TestSwaggerValidator(t *testing.T) {
 			expectedResponse: nil,
 		},
 		{
-			description:    "UUID format tag on an array of strings with non-uuid values",
+			description:    "Non-UUID string in a UUID array",
 			in:             payload{FormatStringArr: []string{"not-a-uuid"}},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -72,13 +71,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      "Testing uuid format tag on an array of strings with uuid values",
+			description:      "UUID strings in a UUID array",
 			in:               payload{FormatStringArr: []string{testUUID}},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description:    "Testing min len string tag with a string shorter than minimum required length",
+			description:    "String shorter than minimum required",
 			in:             payload{MinLenString: "1234"},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -86,14 +85,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      "Testing min len string tag with a string longer than minimum required length",
+			description:      "String longer than minimum required",
 			in:               payload{MinLenString: "123456"},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description: `Testing min len string tag with an array of strings where 
-					at least one entry is shorter than minimum required length`,
+			description:    "String in an array shorter than minimum required",
 			in:             payload{MinLenStringArr: []string{"1234"}},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -101,14 +99,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description: `Testing min len string tag with an array of strings where 
-					all entries are greater than or equal to minimum required length`,
+			description:      "Strings in an array longer than minimum required",
 			in:               payload{MinLenStringArr: []string{"12345", "123456"}},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description:    "Testing max len string tag with a string longer than maximum allowed length",
+			description:    "String longer than maximum allowed",
 			in:             payload{MaxLenString: "12345678"},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -116,14 +113,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      "Testing max len string tag with a string shorter than maximum allowed length",
+			description:      "String shoter or equal to maximum allowed",
 			in:               payload{MaxLenString: "123456"},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description: `Testing max len string tag with an array of strings where 
-					at least one entry is longer than maximum allowed length`,
+			description:    `String in an array longer than maximum allowed`,
 			in:             payload{MaxLenStringArr: []string{"12345678"}},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -131,14 +127,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description: `Testing max len string tag with an array of strings where 
-					all entries are shorter than or equal to maxmimum allowed length`,
+			description:      "Strings in an array shorter than or euqal to maximum allowed",
 			in:               payload{MaxLenStringArr: []string{"123456", "1234567"}},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description:    "Testing enum string tag with a prohibited string value",
+			description:    "String does not match enumaration",
 			in:             payload{EnumString: "test"},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -146,13 +141,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      "Testing enum string tag with an allowed string value",
+			description:      "String matches enumeration",
 			in:               payload{EnumString: "Foo"},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description:    "Testing enum string tag on an array of strings where at least one value is prohibited",
+			description:    "String in an array does not match enumeration",
 			in:             payload{EnumStringArr: []string{"test"}},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -160,13 +155,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      `Testing enum string tag on an array of strings where all values are allowed`,
+			description:      `Strings in an arrya match enumeration`,
 			in:               payload{EnumStringArr: []string{"Bar"}},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description:    "Testing pattern string tag with a value that does not match the pattern",
+			description:    "String does not match pattern",
 			in:             payload{PatternString: "test"},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -174,14 +169,13 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description:      "Testing pattern string tag with a value that does match the pattern",
+			description:      "String matches pattern",
 			in:               payload{PatternString: "test1"},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
 		{
-			description: `Testing pattern string tag on an array of strings 
-					where at least one value does not match the pattern`,
+			description:    `String in an array does not match pattern`,
 			in:             payload{PatternStringArr: []string{"test"}},
 			expectedStatus: 400,
 			expectedResponse: map[string]interface{}{
@@ -189,8 +183,7 @@ func TestSwaggerValidator(t *testing.T) {
 			},
 		},
 		{
-			description: `Testing pattern string tag on an array of strings 
-					where at all values match the pattern`,
+			description:      "Strings in an array match pattern",
 			in:               payload{PatternStringArr: []string{"test1", "test2", "test3"}},
 			expectedStatus:   200,
 			expectedResponse: nil,
@@ -226,9 +219,8 @@ func TestSwaggerValidator(t *testing.T) {
 		r.Handle(endpoint.Method, path, h)
 	})
 
-	r.Run()
 	for _, tt := range testTable {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.description, func(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			req := preparePostRequest(url, tt.in)
@@ -239,14 +231,13 @@ func TestSwaggerValidator(t *testing.T) {
 			if w.Body != nil && w.Body.String() != "" {
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				if err != nil {
-					panic(fmt.Sprintf("Failed to unmarshal body while running test: %q. Error: %s", tt.name, err))
+					panic(fmt.Sprintf("Failed to unmarshal body while running test: %q. Error: %s", tt.description, err))
 				}
 
 				assert.Equal(t, tt.expectedResponse, body["details"])
 			}
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
-
 		})
 	}
 }
@@ -265,6 +256,4 @@ func preparePostRequest(url string, body payload) *http.Request {
 	return req
 }
 
-func testHandler(c *gin.Context) {
-
-}
+func testHandler(c *gin.Context) {}
