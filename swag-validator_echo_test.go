@@ -14,7 +14,7 @@ import (
 	"github.com/miketonks/swag/swagger"
 	"github.com/stretchr/testify/assert"
 
-	sv "github.com/miketonks/swag-validator"
+	sv "github.com/Rekfuki/swag-validator"
 )
 
 func createEngineEcho(api *swagger.API) (r *echo.Echo) {
