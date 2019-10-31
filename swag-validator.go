@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo"
+	"github.com/miketonks/swag"
 	"github.com/miketonks/swag/swagger"
 	"github.com/xeipuuv/gojsonschema"
 )
@@ -39,6 +41,9 @@ type RequestParameter struct {
 	Nullable             bool           `json:"nullable,omitempty"`
 	Enum                 []string       `json:"enum,omitempty"`
 	Pattern              string         `json:"pattern,omitempty"`
+	MinItems             int            `json:"minItems,omitempty"`
+	MaxItems             int            `json:"maxItems,omitempty"`
+	UniqueItems          bool           `json:"uniqueItems,omitempty"`
 	MaxLength            int            `json:"maxLength,omitempty"`
 	MinLength            int            `json:"minLength,omitempty"`
 	Minimum              *int64         `json:"minimum,omitempty"`
@@ -57,6 +62,9 @@ type SchemaDefinition struct {
 	Properties           map[string]SchemaProperty `json:"properties,omitempty"`
 	Enum                 []string                  `json:"enum,omitempty"`
 	Pattern              string                    `json:"pattern,omitempty"`
+	MinItems             int                       `json:"minItems,omitempty"`
+	MaxItems             int                       `json:"maxItems,omitempty"`
+	UniqueItems          bool                      `json:"uniqueItems,omitempty"`
 	MinLength            int                       `json:"minLength,omitempty"`
 	MaxLength            int                       `json:"maxLength,omitempty"`
 	Minimum              *int64                    `json:"minimum,omitempty"`
@@ -76,6 +84,9 @@ type SchemaProperty struct {
 	Example              string         `json:"example,omitempty"`
 	Items                *swagger.Items `json:"items,omitempty"`
 	Pattern              string         `json:"pattern,omitempty"`
+	MinItems             int            `json:"minItems,omitempty"`
+	MaxItems             int            `json:"maxItems,omitempty"`
+	UniqueItems          bool           `json:"uniqueItems,omitempty"`
 	MinLength            int            `json:"minLength,omitempty"`
 	MaxLength            int            `json:"maxLength,omitempty"`
 	Minimum              *int64         `json:"minimum,omitempty"`
@@ -131,7 +142,7 @@ func loadValueForKey(properties map[string]interface{}, key string, values []str
 	return result
 }
 
-// SwaggerValidator middleware
+// SwaggerValidator Gin middleware
 func SwaggerValidator(api *swagger.API) gin.HandlerFunc {
 
 	apiMap := map[string]gojsonschema.JSONLoader{}
@@ -274,6 +285,153 @@ func SwaggerValidator(api *swagger.API) gin.HandlerFunc {
 	}
 }
 
+// SwaggerValidatorEcho middleware
+func SwaggerValidatorEcho(api *swagger.API) echo.MiddlewareFunc {
+
+	basePath := strings.TrimRight(api.BasePath, "/")
+
+	apiMap := map[string]gojsonschema.JSONLoader{}
+	for _, p := range api.Paths {
+		for _, e := range []*swagger.Endpoint{
+			p.Delete,
+			p.Get,
+			p.Post,
+			p.Put,
+			p.Patch,
+			p.Head,
+			p.Options,
+			p.Trace,
+			p.Connect} {
+			if e != nil && e.Handler != nil {
+				schema := buildRequestSchema(e)
+				schema.Definitions = buildSchemaDefinitions(api)
+				schemaLoader := gojsonschema.NewGoLoader(schema)
+
+				key := e.Method + basePath + swag.ColonPath(e.Path)
+				apiMap[key] = schemaLoader
+			}
+		}
+	}
+
+	// This part runs at runtime, with context for individual request
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			key := c.Request().Method + c.Path()
+			schemaLoader, found := apiMap[key]
+			if !found {
+				return next(c)
+			}
+			ref, _ := schemaLoader.LoadJSON()
+			properties, _ := ref.(map[string]interface{})["properties"].(map[string]interface{})
+
+			document := map[string]interface{}{}
+
+			for _, key := range c.ParamNames() {
+				document[key] = loadValueForKey(properties, key, []string{c.Param(key)})
+			}
+			for k, v := range c.Request().URL.Query() {
+				document[k] = loadValueForKey(properties, k, v)
+			}
+
+			// For muiltipart form, handle params and file uploads
+			if c.Request().Header.Get(echo.HeaderContentType) == "multipart/form-data" {
+				r := c.Request()
+				r.ParseMultipartForm(MaxMemory)
+
+				for k, v := range c.Request().PostForm {
+					document[k] = coerce(v[0], "", "")
+				}
+				if r.MultipartForm != nil && r.MultipartForm.File != nil {
+					for k := range r.MultipartForm.File {
+						document[k] = "x"
+					}
+				}
+			} else if c.Request().Header.Get(echo.HeaderContentType) == "application/x-www-form-urlencoded" {
+				r := c.Request()
+				r.ParseForm()
+
+				body := map[string]interface{}{}
+				for k, v := range c.Request().PostForm {
+					body[k] = coerce(v[0], "", "")
+				}
+				document["body"] = body
+			} else if c.Request().ContentLength > 0 {
+				// For all other types parse body as json, if possible
+
+				// read the response body to a variable
+				var body interface{}
+				b, err := ioutil.ReadAll(c.Request().Body)
+				if err != nil {
+					return c.JSON(
+						http.StatusBadRequest,
+						echo.Map{
+							"message": "Validation error",
+							"details": map[string]string{
+								"body": "Failed to read request body",
+							},
+						},
+					)
+				}
+				err = json.Unmarshal(b, &body)
+				// TODO Consider different error cases: Empty Body, Invalid JSON, Form Data
+				if err != nil {
+					return c.JSON(
+						http.StatusBadRequest,
+						echo.Map{
+							"message": "Validation error",
+							"details": map[string]string{
+								"body": "Invalid JSON format",
+							},
+						},
+					)
+				}
+				document["body"] = body
+
+				//reset the response body to the original unread state
+				c.Request().Body = ioutil.NopCloser(bytes.NewBuffer(b))
+			}
+
+			gojsonschema.Locale = CustomLocale{}
+
+			documentLoader := gojsonschema.NewGoLoader(document)
+			result, err := gojsonschema.Validate(schemaLoader, documentLoader)
+
+			if err != nil {
+				// fmt.Printf("ERROR: %s\n", err)
+				return c.JSON(http.StatusInternalServerError, echo.Map{
+					"message": "swagger document " + err.Error(),
+				})
+
+			} else if result.Valid() {
+				// fmt.Printf("The document is valid\n")
+				return next(c)
+			} else {
+				// fmt.Printf("The document is not valid. see errors :\n")
+				errors := map[string]string{}
+				for _, err := range result.Errors() {
+					description := err.Description()
+					details := err.Details()
+
+					field := details["field"].(string)
+					if val, ok := details["property"]; ok {
+						field += "." + val.(string)
+					}
+					field = strings.TrimPrefix(field, "body.")
+					field = strings.TrimPrefix(field, "(root).")
+					errors[field] = description
+				}
+				// fmt.Printf("The document is not valid. see errors : %+v\n", errors)
+				return c.JSON(http.StatusBadRequest, echo.Map{
+					"message": "Validation error",
+					"details": errors,
+				})
+			}
+
+			return nil
+		}
+	}
+}
+
 // Data types are defined here: https://swagger.io/specification/#dataTypes
 func coerce(value string, valueType string, valueFormat string) interface{} {
 	switch valueType {
@@ -354,6 +512,10 @@ func buildRequestSchema(e *swagger.Endpoint) *RequestSchema {
 				Nullable:             p.Nullable,
 				Items:                p.Items,
 				Enum:                 p.Enum,
+				Pattern:              p.Pattern,
+				MinItems:             p.MinItems,
+				MaxItems:             p.MaxItems,
+				UniqueItems:          p.UniqueItems,
 				MinLength:            p.MinLength,
 				MaxLength:            p.MaxLength,
 				Minimum:              p.Minimum,
@@ -392,6 +554,10 @@ func buildSchemaDefinitions(api *swagger.API) map[string]SchemaDefinition {
 				Ref:                  p.Ref,
 				Example:              p.Example,
 				Items:                p.Items,
+				Pattern:              p.Pattern,
+				MinItems:             p.MinItems,
+				MaxItems:             p.MaxItems,
+				UniqueItems:          p.UniqueItems,
 				MinLength:            p.MinLength,
 				MaxLength:            p.MaxLength,
 				Minimum:              p.Minimum,
