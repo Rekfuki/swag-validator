@@ -1,4 +1,4 @@
-module github.com/miketonks/swag-validator
+module github.com/rekufki/swag-validator
 
 go 1.12
 
