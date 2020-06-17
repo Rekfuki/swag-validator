@@ -8,13 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo"
+	"github.com/labstack/echo/v4"
 	swag "github.com/miketonks/swag"
+	sv "github.com/miketonks/swag-validator"
 	"github.com/miketonks/swag/endpoint"
 	"github.com/miketonks/swag/swagger"
 	"github.com/stretchr/testify/assert"
-
-	sv "github.com/Rekfuki/swag-validator"
 )
 
 func createEngineEcho(api *swagger.API) (r *echo.Echo) {
@@ -445,6 +444,20 @@ func TestPayloadEcho(t *testing.T) {
 		{
 			description:      "Unique array contains unique items",
 			in:               payload{UniqueItemsAarr: []string{"foo", "bar"}},
+			expectedStatus:   200,
+			expectedResponse: nil,
+		},
+		{
+			description:    "Pattern is invalid",
+			in:             payload{PatternString: "ahoy"},
+			expectedStatus: 400,
+			expectedResponse: map[string]interface{}{
+				"pattern_str": "Does not match pattern '^test$'",
+			},
+		},
+		{
+			description:      "Pattern is valid",
+			in:               payload{PatternString: "test"},
 			expectedStatus:   200,
 			expectedResponse: nil,
 		},
